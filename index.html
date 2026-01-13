@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AssetMaster 2026 Pro</title>
+	<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💰</text></svg>">
+    <meta name="apple-mobile-web-app-title" content="AssetMaster">
+
+	<link rel="apple-touch-icon" href="https://img.icons8.com/fluency/180/money-bag.png">
+
+	<meta name="apple-mobile-web-app-capable" content="yes">
+
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+	<link rel="icon" sizes="192x192" href="https://img.icons8.com/fluency/192/money-bag.png">
+		
+	<script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=JetBrains+Mono:wght@700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f1f5f9; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        .glass-header { background: #0f172a; border-radius: 0 0 2rem 2rem; }
+        .sync-loading { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        [v-cloak] { display: none; }
+        .history-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        .history-table th { background: #f8fafc; color: #64748b; font-size: 10px; padding: 12px 16px; border-bottom: 2px solid #edf2f7; }
+        .history-table td { padding: 16px; border-bottom: 1px solid #f1f5f9; color: #1e293b; font-weight: 700; }
+    </style>
+</head>
+<body class="max-w-md mx-auto shadow-2xl min-h-screen bg-slate-50">
+
+<div id="app" v-cloak>
+    <header class="p-8 glass-header text-white shadow-2xl mb-6 sticky top-0 z-40">
+        <div class="flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-[900] text-amber-400 tracking-tighter italic uppercase">AssetMaster</h1>
+                <p class="text-[9px] opacity-50 font-black tracking-[0.2em]">2026 資產同步版 v2.1</p>
+            </div>
+            <div class="flex gap-2">
+                <div @click="showSettings = true" class="bg-white/10 p-3 rounded-xl border border-white/20 text-amber-200 cursor-pointer active:scale-90 transition">
+                    <i class="fas fa-cog"></i>
+                </div>
+                <div @click="hardSync" class="bg-amber-400 text-slate-900 px-4 py-2 rounded-xl font-black text-[10px] flex items-center justify-center cursor-pointer active:scale-95">
+                    <i :class="['fas fa-sync-alt mr-1', isSyncing ? 'sync-loading' : '']"></i>
+                    同步
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div v-if="toast.show" class="fixed top-12 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 rounded-2xl bg-slate-900 text-amber-400 font-black shadow-2xl text-sm border border-amber-400/20">
+        {{ toast.msg }}
+    </div>
+
+    <div class="px-5 space-y-6 pb-32">
+        <section class="bg-white p-8 rounded-[2.5rem] shadow-sm border border-white">
+            <p class="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2">總資產估值 (LIVE)</p>
+            <div class="flex items-baseline gap-2 mb-4">
+                <span class="text-xl font-bold text-slate-300">$</span>
+                <span class="text-5xl font-black font-mono tracking-tighter text-slate-800">{{ totalValue.toLocaleString() }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <div v-if="trend.value !== 0" :class="['px-3 py-1 rounded-full text-[10px] font-black', trend.isUp ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600']">
+                    {{ trend.isUp ? '▲' : '▼' }} ${{ Math.abs(trend.value).toLocaleString() }}
+                </div>
+                <span class="text-[10px] text-slate-400 font-bold tracking-tight">相較上個結算月</span>
+            </div>
+        </section>
+
+        <section v-show="assets.length > 0" class="bg-white p-8 rounded-[2.5rem] shadow-sm border border-white">
+            <h3 class="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-6">資產比例分佈</h3>
+            <canvas id="assetChart" class="max-h-[160px]"></canvas>
+        </section>
+
+        <section class="bg-white rounded-[2.5rem] shadow-sm border border-white overflow-hidden">
+            <div class="p-6 pb-2 flex justify-between">
+                <h2 class="text-[11px] font-black text-slate-400 uppercase tracking-widest">月結歷史紀錄</h2>
+                <span class="text-[9px] text-amber-600 font-black bg-amber-50 px-2 py-0.5 rounded">系統校時: {{ currentMonthStr }}</span>
+            </div>
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th class="text-left">月份</th>
+                        <th class="text-right">總金額</th>
+                        <th class="text-right">標籤</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="h in sortedHistory" :key="h.date" :class="{'bg-amber-50/40': h.date === currentMonthStr}">
+                        <td class="font-mono text-sm text-slate-500">{{ h.date }}</td>
+                        <td class="text-right font-mono font-black text-slate-800">${{ h.total.toLocaleString() }}</td>
+                        <td class="text-right">
+                            <span :class="h.date === currentMonthStr ? 'bg-amber-400 text-slate-900' : 'bg-slate-100 text-slate-400'" class="text-[9px] px-2 py-1 rounded font-black">
+                                {{ h.date === currentMonthStr ? '結算中' : '已封存' }}
+                            </span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <div class="space-y-4">
+            <h2 class="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-2">帳戶清單</h2>
+            <div v-for="(item, index) in assets" :key="index" @click="openEdit(index)" class="bg-white p-6 rounded-[2rem] shadow-sm flex justify-between items-center cursor-pointer border border-white active:scale-95 transition-all">
+                <div>
+                    <h3 class="font-black text-slate-800">{{ item.name }}</h3>
+                    <p class="text-[10px] font-bold text-amber-500">{{ item.rate }}% APY</p>
+                </div>
+                <div class="text-2xl font-black font-mono tracking-tighter text-slate-800">${{ item.amount.toLocaleString() }}</div>
+            </div>
+        </div>
+    </div>
+
+    <button @click="openAdd" class="fixed bottom-10 right-8 w-16 h-16 bg-slate-900 text-amber-400 rounded-full shadow-2xl flex items-center justify-center z-40 border-4 border-white active:scale-90 transition-all">
+        <i class="fas fa-plus text-2xl"></i>
+    </button>
+
+    <div v-if="showSettings" class="fixed inset-0 z-[100] flex items-center justify-center px-6">
+        <div class="absolute inset-0 bg-slate-900/90 backdrop-blur-sm" @click="showSettings = false"></div>
+        <div class="bg-white w-full max-w-sm rounded-[3rem] p-8 relative z-10">
+            <h3 class="font-black mb-4 italic text-slate-800">雲端 API 設定</h3>
+            <input v-model="config.gasUrl" type="text" class="w-full bg-slate-50 p-4 rounded-xl text-xs font-mono outline-none border border-slate-100 mb-4" placeholder="GAS URL">
+            <button @click="saveConfig" class="w-full bg-slate-900 text-amber-400 py-4 rounded-xl font-black active:scale-95 transition">儲存並重載</button>
+        </div>
+    </div>
+
+    <div v-if="editIndex !== null" class="fixed inset-0 z-[100] flex items-end justify-center px-4 pb-10">
+        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-md" @click="editIndex = null"></div>
+        <div class="bg-white w-full max-w-sm rounded-[3rem] p-8 relative z-10 border-t-8 border-amber-400">
+            <h3 class="text-2xl font-black text-slate-800 mb-6 italic uppercase">{{ editIndex === -1 ? '新增帳戶' : '編輯資產' }}</h3>
+            <div class="space-y-4">
+                <input v-model="tempAsset.name" type="text" placeholder="名稱" class="w-full bg-slate-50 p-4 rounded-xl font-bold outline-none">
+                <div class="flex gap-4">
+                    <input v-model.number="tempAsset.amount" type="number" placeholder="金額" class="w-full bg-slate-50 p-4 rounded-xl font-black outline-none">
+                    <input v-model.number="tempAsset.rate" type="number" step="0.1" placeholder="利率" class="w-full bg-slate-50 p-4 rounded-xl font-black outline-none">
+                </div>
+                <button @click="saveAsset" class="w-full bg-slate-900 text-amber-400 py-5 rounded-2xl font-black text-lg active:scale-95 transition">確定儲存</button>
+                <button v-if="editIndex !== -1" @click="deleteAsset" class="w-full text-red-500 font-bold text-xs underline pt-2">刪除此項目</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+createApp({
+    setup() {
+        const config = ref({ gasUrl: localStorage.getItem('am_gasUrl') || '' });
+        const assets = ref(JSON.parse(localStorage.getItem('am_assets_v2')) || []);
+        const historyLog = ref(JSON.parse(localStorage.getItem('am_history')) || []);
+        const isSyncing = ref(false);
+        const showSettings = ref(false);
+        const editIndex = ref(null);
+        const tempAsset = ref({});
+        const toast = ref({ show: false, msg: '' });
+        let chart = null;
+
+        const formatDate = (dateInput) => {
+            const d = new Date(dateInput);
+            if (isNaN(d.getTime())) return null;
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        };
+
+        const currentMonthStr = computed(() => formatDate(new Date()));
+        const totalValue = computed(() => assets.value.reduce((sum, a) => sum + (Number(a.amount) || 0), 0));
+        
+        const sortedHistory = computed(() => {
+            return [...historyLog.value].sort((a, b) => b.date.localeCompare(a.date));
+        });
+
+        const trend = computed(() => {
+            const lastRecords = sortedHistory.value.filter(h => h.date !== currentMonthStr.value);
+            if (lastRecords.length === 0) return { value: 0, isUp: true };
+            const diff = totalValue.value - lastRecords[0].total;
+            return { value: diff, isUp: diff >= 0 };
+        });
+
+        const showToast = (msg) => { toast.value = { show: true, msg }; setTimeout(() => toast.value.show = false, 2000); };
+
+        const updateChart = () => {
+			nextTick(() => {
+				const ctx = document.getElementById('assetChart')?.getContext('2d');
+				if (!ctx) return;
+				if (chart) chart.destroy();
+				chart = new Chart(ctx, {
+					type: 'doughnut',
+					data: {
+						labels: assets.value.map(a => a.name),
+						datasets: [{
+							data: assets.value.map(a => a.amount),
+							// 使用更協調的金融深色系
+							backgroundColor: [
+								'#0f172a', // 深藍
+								'#f59e0b', // 琥珀
+								'#10b981', // 翡翠綠
+								'#6366f1', // 靛藍
+								'#f43f5e', // 玫瑰紅
+								'#94a3b8'  // 灰藍
+							],
+							borderWidth: 5,
+							borderColor: '#ffffff',
+							hoverOffset: 10
+						}]
+					},
+					options: { 
+						cutout: '70%', 
+						plugins: { legend: { display: false } },
+						animation: { animateScale: true }
+					}
+				});
+			});
+		};
+
+        const saveLocal = () => {
+            localStorage.setItem('am_assets_v2', JSON.stringify(assets.value));
+            localStorage.setItem('am_history', JSON.stringify(historyLog.value));
+            updateChart();
+        };
+
+        const forceRefreshSettle = () => {
+            const today = formatDate(new Date());
+            let map = new Map();
+            historyLog.value.forEach(h => {
+                const cleanD = formatDate(h.date);
+                if (cleanD) map.set(cleanD, Number(h.total));
+            });
+            map.set(today, totalValue.value);
+            historyLog.value = Array.from(map, ([date, total]) => ({ date, total }));
+            saveLocal();
+        };
+
+        const syncData = async (action = 'save') => {
+            if (!config.value.gasUrl) return;
+            isSyncing.value = true;
+            try {
+                const url = action === 'load' ? `${config.value.gasUrl}?t=${Date.now()}` : config.value.gasUrl;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    mode: 'cors',
+                    body: JSON.stringify({ action, assets: assets.value, history: historyLog.value })
+                });
+
+                if (action === 'load') {
+                    const data = await res.json();
+                    assets.value = data.assets || [];
+                    historyLog.value = data.history || [];
+                    forceRefreshSettle();
+                    await syncData('save'); 
+                    showToast("同步成功");
+                } else {
+                    showToast("備份完成");
+                }
+            } catch (e) { showToast("連線失敗"); }
+            finally { isSyncing.value = false; }
+        };
+
+        const hardSync = () => {
+            showToast("校對系統時間中...");
+            setTimeout(() => syncData('load'), 300);
+        };
+
+        const saveAsset = async () => {
+            const data = { name: tempAsset.value.name, amount: Number(tempAsset.value.amount), rate: Number(tempAsset.value.rate) };
+            if (editIndex.value === -1) assets.value.push(data);
+            else assets.value[editIndex.value] = data;
+            editIndex.value = null;
+            forceRefreshSettle();
+            await syncData('save');
+        };
+
+        const deleteAsset = async () => {
+            if (confirm('確定刪除？')) {
+                assets.value.splice(editIndex.value, 1);
+                editIndex.value = null;
+                forceRefreshSettle();
+                await syncData('save');
+            }
+        };
+
+        const openEdit = (i) => { editIndex.value = i; tempAsset.value = { ...assets.value[i] }; };
+        const openAdd = () => { editIndex.value = -1; tempAsset.value = { name: '', amount: 0, rate: 0 }; };
+        const saveConfig = () => { localStorage.setItem('am_gasUrl', config.value.gasUrl); showSettings.value = false; hardSync(); };
+
+        onMounted(() => { 
+            if (config.value.gasUrl) syncData('load'); 
+            else updateChart();
+        });
+
+        return { config, assets, historyLog, currentMonthStr, totalValue, sortedHistory, trend, isSyncing, showSettings, editIndex, tempAsset, toast, openEdit, openAdd, saveAsset, deleteAsset, saveConfig, syncData, hardSync };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
